@@ -11,14 +11,19 @@
 119 RCDATA "assets\\rules-title.png"
 120 RCDATA "assets\\alliance-label.png"
 121 RCDATA "assets\\horde-label.png"
+122 RCDATA "assets\\character-list-ruleset.png"
+123 RCDATA "assets\\create-character.png"
+124 RCDATA "assets\\login-queue.png"
+125 RCDATA "assets\\login-unavailable.png"
+126 RCDATA "assets\\name-rejected.png"
 
-IDD_SETUP DIALOGEX 0, 0, 380, 296
+IDD_SETUP DIALOGEX 0, 0, 380, 345
 STYLE DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "WoW Nested setup"
 FONT 10, "Segoe UI"
 BEGIN
     LTEXT       "Welcome to WoW Nested", IDC_SETUP_HEADING, 18, 12, 344, 25
-    LTEXT       "Choose the character you want to create.", -1, 18, 43, 344, 14
+    LTEXT       "Choose your character and how to retry.", -1, 18, 43, 344, 14
 
     LTEXT       "&Ruleset", -1, 18, 68, 103, 12
     COMBOBOX    IDC_RULESET, 18, 82, 110, 106, CBS_DROPDOWNLIST | WS_TABSTOP
@@ -37,14 +42,18 @@ BEGIN
     LTEXT       "&Secondary name", -1, 193, 154, 169, 12
     EDITTEXT    IDC_SECOND_NAME, 193, 168, 169, 17, ES_AUTOHSCROLL | WS_TABSTOP
 
-    LTEXT       "Battle.net", -1, 18, 204, 75, 12
-    LTEXT       "", IDC_BATTLENET_STATE, 111, 204, 166, 12
-    PUSHBUTTON  "Browse...", IDC_BROWSE_BATTLENET, 294, 200, 68, 17
-    LTEXT       "WoW: Forever", -1, 18, 226, 90, 12
-    LTEXT       "", IDC_WOW_STATE, 111, 226, 166, 12
-    PUSHBUTTON  "Browse...", IDC_BROWSE_WOW, 294, 222, 68, 17
+    LTEXT       "Re&try mode", -1, 18, 199, 90, 12
+    COMBOBOX    IDC_RETRY_MODE, 18, 213, 165, 66, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT       "", IDC_MODE_DESCRIPTION, 193, 201, 169, 39
 
-    LTEXT       "", IDC_SETUP_ERROR, 18, 244, 344, 23
-    PUSHBUTTON  "Cancel", IDCANCEL, 202, 270, 69, 17
-    DEFPUSHBUTTON "Save setup", IDOK, 282, 270, 80, 17
+    LTEXT       "Battle.net", -1, 18, 253, 75, 12
+    LTEXT       "", IDC_BATTLENET_STATE, 111, 253, 166, 12
+    PUSHBUTTON  "Browse...", IDC_BROWSE_BATTLENET, 294, 249, 68, 17
+    LTEXT       "WoW: Forever", -1, 18, 275, 90, 12
+    LTEXT       "", IDC_WOW_STATE, 111, 275, 166, 12
+    PUSHBUTTON  "Browse...", IDC_BROWSE_WOW, 294, 271, 68, 17
+
+    LTEXT       "", IDC_SETUP_ERROR, 18, 293, 344, 23
+    PUSHBUTTON  "Cancel", IDCANCEL, 202, 319, 69, 17
+    DEFPUSHBUTTON "Save", IDOK, 282, 319, 80, 17
 END

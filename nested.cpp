@@ -39,7 +39,7 @@ void PublishStatus(NestedDisplay& display, const std::wstring& text) {
     InterlockedIncrement(&display.statusSequence);
 }
 
-void PublishFrame(PanelFrame& panel, const Frame* frame) {
+void PublishFrame(PanelFrame& panel, const Frame* frame, bool hideName) {
     if (!frame && !panel.visible)
         return;
     InterlockedIncrement(&panel.sequence);
@@ -52,8 +52,14 @@ void PublishFrame(PanelFrame& panel, const Frame* frame) {
             const int sourceY = y * frame->height / panel.height;
             for (int x = 0; x < panel.width; ++x) {
                 const int sourceX = x * frame->width / panel.width;
-                const auto* source = frame->pixels.data() + (sourceY * frame->width + sourceX) * 4;
-                std::memcpy(panel.pixels + (y * panel.width + x) * 4, source, 4);
+                auto* target = panel.pixels + (y * panel.width + x) * 4;
+                if (hideName && sourceY < 185 && sourceX >= 760 && sourceX < 1800) {
+                    constexpr std::uint8_t cover[]{41, 36, 21, 255};
+                    std::memcpy(target, cover, sizeof cover);
+                } else {
+                    const auto* source = frame->pixels.data() + (sourceY * frame->width + sourceX) * 4;
+                    std::memcpy(target, source, 4);
+                }
             }
         }
         panel.visible = TRUE;
@@ -98,7 +104,7 @@ std::wstring CreateDesktopName() {
 
 class NestedSession::State {
 public:
-    State(const Profile& profile, bool checkOnly) {
+    State(const Profile& profile, WorkflowMode mode) {
         if (const auto error = ValidateProfile(profile); !error.empty())
             throw UserError{error};
         if (BlizzardRunning())
@@ -125,7 +131,8 @@ public:
         if (!length || length >= executable.size())
             throw UserError{L"Could not find this app's file path."};
         executable.resize(length);
-        std::wstring command = L"\"" + executable + L"\" --nested-worker " + name + (checkOnly ? L" check" : L" run");
+        std::wstring command = L"\"" + executable + L"\" --nested-worker " + name + L" ";
+        command += workerModes[static_cast<std::size_t>(mode)];
         std::wstring destination = name;
         STARTUPINFOW startup{};
         startup.cb = sizeof startup;
@@ -148,14 +155,20 @@ public:
         }
     }
 
+    ~State() {
+        if (WaitForSingleObject(process.value, 0) == WAIT_TIMEOUT)
+            TerminateProcess(process.value, 1);
+        TerminateJobObject(job.value, 1);
+    }
+
     Desktop desktop;
     Handle stopEvent, memory, job, process;
     Mapping mapped;
     std::unique_ptr<AppAudio> audio;
 };
 
-NestedSession::NestedSession(const Profile& profile, bool checkOnly)
-    : state(std::make_unique<State>(profile, checkOnly)) {}
+NestedSession::NestedSession(const Profile& profile, WorkflowMode mode)
+    : state(std::make_unique<State>(profile, mode)) {}
 NestedSession::~NestedSession() = default;
 
 void NestedSession::stop() {
@@ -166,12 +179,21 @@ void NestedSession::setMuted(bool muted) {
     state->audio->setMuted(muted);
 }
 
+void NestedSession::setPreviewVisible(bool visible) {
+    InterlockedExchange(&state->mapped.view->previewVisible, visible ? 1 : 0);
+}
+
 bool NestedSession::audioFailed() const {
     return state->audio->failed();
 }
 
 bool NestedSession::ended() const {
     return WaitForSingleObject(state->process.value, 0) == WAIT_OBJECT_0;
+}
+
+bool NestedSession::captureTimedOut() const {
+    const auto started = InterlockedCompareExchange64(&state->mapped.view->captureStartedAt, 0, 0);
+    return started != 0 && GetTickCount64() - static_cast<ULONGLONG>(started) >= 35000;
 }
 
 DWORD NestedSession::exitCode() const {
@@ -212,7 +234,7 @@ bool NestedSession::readPanel(Frame& frame, LONG& lastSequence) const {
     return true;
 }
 
-int RunNestedWorker(const std::wstring& key, bool checkOnly) {
+int RunNestedWorker(const std::wstring& key, WorkflowMode mode) {
     wchar_t desktop[256]{};
     if (!GetUserObjectInformationW(GetThreadDesktop(GetCurrentThreadId()), UOI_NAME, desktop, sizeof desktop, nullptr)
         || key != desktop || !key.starts_with(L"WoWNested_"))
@@ -220,7 +242,8 @@ int RunNestedWorker(const std::wstring& key, bool checkOnly) {
 
     Handle stopEvent{OpenEventW(SYNCHRONIZE, FALSE, ObjectName(key, L"_Stop").c_str())};
     Handle memory{OpenFileMappingW(FILE_MAP_WRITE, FALSE, ObjectName(key, L"_Display").c_str())};
-    Handle job{OpenJobObjectW(JOB_OBJECT_ASSIGN_PROCESS, FALSE, ObjectName(key, L"_Job").c_str())};
+    Handle job{OpenJobObjectW(JOB_OBJECT_ASSIGN_PROCESS | JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE,
+        FALSE, ObjectName(key, L"_Job").c_str())};
     if (!stopEvent.value || !memory.value || !job.value)
         return 2;
     Mapping mapped{static_cast<NestedDisplay*>(MapViewOfFile(memory.value, FILE_MAP_WRITE, 0, 0, sizeof(NestedDisplay)))};
@@ -237,9 +260,13 @@ int RunNestedWorker(const std::wstring& key, bool checkOnly) {
     });
 
     const auto report = [&](const std::wstring& text) { PublishStatus(*mapped.view, text); };
-    const NestedFrames frames{[&](const Frame* frame) {
-        PublishFrame(mapped.view->game, frame);
-    }};
+    const NestedFrames frames{
+        [&] { return Sequence(&mapped.view->previewVisible) != 0; },
+        [&](const Frame* frame, bool hideName) { PublishFrame(mapped.view->game, frame, hideName); },
+        [&](bool busy) {
+            InterlockedExchange64(&mapped.view->captureStartedAt, busy ? static_cast<LONG64>(GetTickCount64()) : 0);
+        }
+    };
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         try {
@@ -247,7 +274,7 @@ int RunNestedWorker(const std::wstring& key, bool checkOnly) {
             SecureZeroMemory(&mapped.view->profile, sizeof mapped.view->profile);
             if (const auto error = ValidateProfile(profile); !error.empty())
                 throw UserError{error};
-            RunNestedWorkflow(cancellation.get_token(), report, frames, profile, checkOnly, job.value);
+            RunNestedWorkflow(cancellation.get_token(), report, frames, profile, mode, job.value);
         } catch (...) {
             winrt::uninit_apartment();
             throw;

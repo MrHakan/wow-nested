@@ -58,6 +58,7 @@ std::wstring PickLauncher(HWND dialog, bool battleNet) {
 
 struct Setup {
     Profile value;
+    bool editing;
     HFONT heading = nullptr;
 
     ~Setup() {
@@ -72,6 +73,10 @@ struct Setup {
     }
 
     void initialize(HWND dialog) {
+        if (editing) {
+            SetWindowTextW(dialog, L"WoW Nested settings");
+            SetDlgItemTextW(dialog, IDC_SETUP_HEADING, L"Settings");
+        }
         LOGFONTW font{};
         auto base = reinterpret_cast<HFONT>(SendMessageW(dialog, WM_GETFONT, 0, 0));
         if (GetObjectW(base, sizeof font, &font)) {
@@ -85,6 +90,8 @@ struct Setup {
         SetChoices(dialog, IDC_FACTION, factions, int(value.faction));
         SetChoices(dialog, IDC_RACE, races[int(value.faction)], value.race);
         SetChoices(dialog, IDC_BODY, bodies, int(value.body));
+        SetChoices(dialog, IDC_RETRY_MODE, retryModes, int(value.retryMode));
+        describeMode(dialog);
         SetClasses(dialog, value.faction, value.race, value.characterClass);
         SendDlgItemMessageW(dialog, IDC_FIRST_NAME, EM_SETLIMITTEXT, maxNameLength, 0);
         SendDlgItemMessageW(dialog, IDC_SECOND_NAME, EM_SETLIMITTEXT, maxNameLength, 0);
@@ -93,12 +100,20 @@ struct Setup {
         installationStatus(dialog);
     }
 
+    void describeMode(HWND dialog) const {
+        const bool loop = Selection(dialog, IDC_RETRY_MODE) == int(RetryMode::Loop);
+        SetDlgItemTextW(dialog, IDC_MODE_DESCRIPTION, loop
+            ? L"Retries Finish on the same screen after dismissing the population warning."
+            : L"Reopens Battle.net and WoW after the population warning.");
+    }
+
     bool save(HWND dialog) {
         value.ruleset = static_cast<Ruleset>(Selection(dialog, IDC_RULESET));
         value.faction = static_cast<Faction>(Selection(dialog, IDC_FACTION));
         value.race = Selection(dialog, IDC_RACE);
         value.body = static_cast<Body>(Selection(dialog, IDC_BODY));
         value.characterClass = SelectedClass(dialog);
+        value.retryMode = static_cast<RetryMode>(Selection(dialog, IDC_RETRY_MODE));
         value.firstName = ReadName(dialog, IDC_FIRST_NAME);
         value.secondName = ReadName(dialog, IDC_SECOND_NAME);
         if (const auto error = ValidateProfile(value); !error.empty()) {
@@ -142,6 +157,10 @@ INT_PTR CALLBACK SetupDialog(HWND dialog, UINT message, WPARAM wParam, LPARAM lP
         EndDialog(dialog, IDCANCEL);
         return TRUE;
     }
+    if (control == IDC_RETRY_MODE && HIWORD(wParam) == CBN_SELCHANGE) {
+        setup.describeMode(dialog);
+        return TRUE;
+    }
     if (HIWORD(wParam) == CBN_SELCHANGE && (control == IDC_FACTION || control == IDC_RACE)) {
         const auto faction = static_cast<Faction>(Selection(dialog, IDC_FACTION));
         const auto preferred = SelectedClass(dialog);
@@ -164,7 +183,7 @@ INT_PTR CALLBACK SetupDialog(HWND dialog, UINT message, WPARAM wParam, LPARAM lP
 } // namespace
 
 bool ShowSetup(HINSTANCE instance, HWND parent, Profile& profile) {
-    Setup dialog{profile};
+    Setup dialog{profile, parent != nullptr};
     if (DialogBoxParamW(instance, MAKEINTRESOURCEW(IDD_SETUP), parent, SetupDialog,
                         reinterpret_cast<LPARAM>(&dialog)) != IDOK)
         return false;

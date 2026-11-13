@@ -174,24 +174,6 @@ std::wstring Process::path() const {
     return path;
 }
 
-bool ProcessRunning(HANDLE process) {
-    return WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
-}
-
-void WaitForExit(HANDLE process, std::chrono::milliseconds timeout, std::stop_token stop,
-                 const std::wstring& error) {
-    const auto deadline = Clock::now() + timeout;
-    do {
-        CheckStop(stop);
-        switch (WaitForSingleObject(process, 75)) {
-        case WAIT_OBJECT_0: return;
-        case WAIT_TIMEOUT: break;
-        default: throw UserError{error};
-        }
-    } while (Clock::now() < deadline);
-    throw UserError{error};
-}
-
 void CheckStop(std::stop_token stop) {
     if (stop.stop_requested())
         throw Cancelled{};

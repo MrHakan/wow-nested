@@ -10,6 +10,7 @@ constexpr int startButtonId = 102;
 constexpr int stopButtonId = 103;
 constexpr int muteButtonId = 104;
 constexpr int setupButtonId = 105;
+constexpr int modePickerId = 106;
 constexpr COLORREF page = RGB(242, 246, 245);
 constexpr COLORREF ink = RGB(20, 34, 38);
 constexpr COLORREF muted = RGB(78, 102, 104);
@@ -86,17 +87,31 @@ private:
     LRESULT handle(UINT message, WPARAM wParam, LPARAM lParam) {
         switch (message) {
         case WM_CREATE:
+            modePicker = CreateWindowExW(0, L"COMBOBOX", nullptr,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(modePickerId)), instance, nullptr);
+            SendMessageW(modePicker, WM_SETFONT, reinterpret_cast<WPARAM>(labelFont), FALSE);
+            for (const auto* mode : retryModes)
+                SendMessageW(modePicker, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(mode));
+            updateModePicker();
             testButton = button(L"Test setup", testButtonId);
-            startButton = button(L"Start loop", startButtonId);
+            startButton = button(L"Start", startButtonId);
             stopButton = button(L"Stop", stopButtonId);
             muteButton = button(profile.muted ? L"Unmute audio" : L"Mute audio", muteButtonId);
-            setupButton = button(L"Setup", setupButtonId);
+            setupButton = button(L"Settings", setupButtonId);
             EnableWindow(stopButton, FALSE);
             SetTimer(window, 1, 200, nullptr);
             return 0;
         case WM_SIZE:
-            layout();
+            if (wParam == SIZE_MINIMIZED)
+                updatePreview(false);
+            else
+                layout();
             return 0;
+        case WM_ACTIVATE:
+            if (LOWORD(wParam) == WA_INACTIVE)
+                updatePreview(false);
+            break;
         case WM_GETMINMAXINFO:
             reinterpret_cast<MINMAXINFO*>(lParam)->ptMinTrackSize = {800, 500};
             return 0;
@@ -113,8 +128,14 @@ private:
             return 0;
         case WM_COMMAND:
             switch (LOWORD(wParam)) {
-            case testButtonId: start(true); return 0;
-            case startButtonId: start(false); return 0;
+            case testButtonId: start(WorkflowMode::TestSetup); return 0;
+            case startButtonId:
+                start(profile.retryMode == RetryMode::Loop ? WorkflowMode::FinishLoop : WorkflowMode::RestartLoop);
+                return 0;
+            case modePickerId:
+                if (HIWORD(wParam) == CBN_SELCHANGE)
+                    selectMode();
+                return 0;
             case stopButtonId: stop(); return 0;
             case muteButtonId: toggleAudio(); return 0;
             case setupButtonId: openSetup(); return 0;
@@ -122,7 +143,7 @@ private:
             }
             break;
         case WM_CLOSE:
-            if (session) {
+            if (session || recovering) {
                 closing = true;
                 stop();
             } else {
@@ -156,23 +177,34 @@ private:
         previewLauncher = {26, 151, split, height - 146};
         previewGame = {split + 20, 151, width - 26, height - 146};
         statusRect = {26, height - 127, width - 26, height - 73};
+        MoveWindow(modePicker, width - 252, 47, 226, 130, TRUE);
         MoveWindow(testButton, 26, height - 57, 116, 36, TRUE);
-        MoveWindow(startButton, 152, height - 57, 116, 36, TRUE);
-        MoveWindow(stopButton, 278, height - 57, 80, 36, TRUE);
-        MoveWindow(muteButton, 368, height - 57, 134, 36, TRUE);
-        MoveWindow(setupButton, 512, height - 57, 76, 36, TRUE);
+        MoveWindow(startButton, 152, height - 57, 100, 36, TRUE);
+        MoveWindow(stopButton, 262, height - 57, 80, 36, TRUE);
+        MoveWindow(muteButton, 352, height - 57, 134, 36, TRUE);
+        MoveWindow(setupButton, 496, height - 57, 92, 36, TRUE);
         poll();
         InvalidateRect(window, nullptr, FALSE);
     }
 
     void poll() {
-        if (!session)
+        if (!session) {
+            if (recovering && GetTickCount64() >= retryAt) {
+                try {
+                    openSession();
+                    recovering = false;
+                } catch (const UserError& error) {
+                    scheduleRecovery(error.message);
+                }
+            }
             return;
+        }
         if (const bool failed = session->audioFailed(); failed != audioFailed) {
             audioFailed = failed;
             InvalidateRect(window, nullptr, FALSE);
         }
-        if (session->readPanel(gameFrame, gameSequence))
+        updatePreview(!stopping && !IsIconic(window) && GetForegroundWindow() == window);
+        if (previewVisible && session->readPanel(gameFrame, gameSequence))
             InvalidateRect(window, &previewGame, FALSE);
         if (!stopping) {
             const auto message = session->status();
@@ -183,18 +215,26 @@ private:
             const DWORD code = session->exitCode();
             session.reset();
             gameFrame = {};
+            previewVisible = false;
             audioFailed = false;
             InvalidateRect(window, nullptr, FALSE);
             if (stopping)
                 setStatus(L"Stopped. The apps on the hidden desktop were closed.");
             else if (code != 0)
                 setStatus(L"The hidden desktop worker stopped. Windows error " + std::to_wstring(code) + L".");
-            EnableWindow(testButton, TRUE);
-            EnableWindow(startButton, TRUE);
-            EnableWindow(stopButton, FALSE);
-            EnableWindow(setupButton, TRUE);
-            if (closing)
-                DestroyWindow(window);
+            finishSession();
+        } else if (!stopping && session->captureTimedOut()) {
+            session.reset();
+            gameFrame = {};
+            previewVisible = false;
+            audioFailed = false;
+            if (activeMode == WorkflowMode::TestSetup) {
+                setStatus(L"WoW screen capture did not respond for 35 seconds.");
+                finishSession();
+            } else {
+                scheduleRecovery(L"WoW screen capture did not respond for 35 seconds.");
+            }
+            InvalidateRect(window, nullptr, FALSE);
         }
     }
 
@@ -212,7 +252,9 @@ private:
         Fill(dc, {0, 0, client.right, 5}, accent);
         Text(dc, L"WoW Nested", {26, 22, client.right - 26, 62}, titleFont, ink, DT_SINGLELINE);
         Text(dc, CharacterSummary(profile),
-             {27, 71, client.right - 26, 99}, bodyFont, muted, DT_SINGLELINE | DT_END_ELLIPSIS);
+             {27, 71, client.right - 270, 99}, bodyFont, muted, DT_SINGLELINE | DT_END_ELLIPSIS);
+        Text(dc, L"Retry mode", {client.right - 252, 22, client.right - 26, 44},
+             labelFont, ink, DT_SINGLELINE);
         Text(dc, L"Session", {previewLauncher.left, 119, previewLauncher.right, 144},
              labelFont, ink, DT_SINGLELINE);
         Text(dc, L"WoW: Forever", {previewGame.left, 119, previewGame.right, 144},
@@ -220,12 +262,13 @@ private:
         Fill(dc, previewLauncher, RGB(228, 237, 234));
         RECT launcherText = previewLauncher;
         InflateRect(&launcherText, -14, -15);
-        Text(dc, session ? L"Running" : L"Ready to start",
+        Text(dc, recovering ? L"Restarting" : session ? L"Running" : L"Ready to start",
              launcherText, labelFont, accent, DT_SINGLELINE);
         launcherText.top += 30;
         Text(dc, L"Account details are hidden.",
              launcherText, bodyFont, muted, DT_WORDBREAK);
-        paintPreview(dc, previewGame, gameFrame, session ? L"Waiting for the character screen" : L"WoW is closed");
+        paintPreview(dc, previewGame, gameFrame, !session ? L"WoW is closed"
+            : previewVisible ? L"Waiting for the character screen" : L"Preview paused");
         Fill(dc, statusRect, RGB(221, 237, 232));
         RECT detail = statusRect;
         InflateRect(&detail, -12, -8);
@@ -266,30 +309,95 @@ private:
         InvalidateRect(window, &statusRect, FALSE);
     }
 
-    void start(bool test) {
-        if (session)
+    void updatePreview(bool visible) {
+        if (!session || previewVisible == visible)
             return;
+        if (visible) {
+            Frame previous;
+            session->readPanel(previous, gameSequence);
+        } else {
+            gameFrame = {};
+        }
+        previewVisible = visible;
+        session->setPreviewVisible(visible);
+        InvalidateRect(window, &previewGame, FALSE);
+    }
+
+    void updateModePicker() {
+        SendMessageW(modePicker, CB_SETCURSEL, static_cast<WPARAM>(profile.retryMode), 0);
+    }
+
+    void selectMode() {
+        const auto selected = SendMessageW(modePicker, CB_GETCURSEL, 0, 0);
+        if (session || recovering || selected < 0 || static_cast<std::size_t>(selected) >= retryModes.size())
+            return;
+        const auto previous = profile.retryMode;
+        profile.retryMode = static_cast<RetryMode>(selected);
         try {
-            session = std::make_unique<NestedSession>(profile, test);
+            SaveProfile(profile);
+            setStatus(L"Retry mode saved.");
+        } catch (const UserError& error) {
+            profile.retryMode = previous;
+            updateModePicker();
+            setStatus(error.message);
+        }
+    }
+
+    void start(WorkflowMode mode) {
+        if (session || recovering)
+            return;
+        activeMode = mode;
+        stopping = false;
+        try {
+            openSession();
         } catch (const UserError& error) {
             setStatus(error.message);
             return;
         }
-        stopping = false;
-        gameFrame = {};
-        gameSequence = 0;
         EnableWindow(testButton, FALSE);
         EnableWindow(startButton, FALSE);
+        EnableWindow(modePicker, FALSE);
         EnableWindow(stopButton, TRUE);
         EnableWindow(setupButton, FALSE);
+    }
+
+    void openSession() {
+        session = std::make_unique<NestedSession>(profile, activeMode);
+        gameFrame = {};
+        gameSequence = 0;
+        updatePreview(!IsIconic(window) && GetForegroundWindow() == window);
         setStatus(L"Opening the hidden desktop.");
         InvalidateRect(window, nullptr, FALSE);
     }
 
+    void scheduleRecovery(const std::wstring& reason) {
+        recovering = true;
+        retryAt = GetTickCount64() + 10000;
+        setStatus(reason + L" Restarting the session in 10 seconds.");
+    }
+
+    void finishSession() {
+        EnableWindow(testButton, TRUE);
+        EnableWindow(startButton, TRUE);
+        EnableWindow(modePicker, TRUE);
+        EnableWindow(stopButton, FALSE);
+        EnableWindow(setupButton, TRUE);
+        if (closing)
+            DestroyWindow(window);
+    }
+
     void stop() {
+        if (recovering) {
+            recovering = false;
+            setStatus(L"Stopped.");
+            InvalidateRect(window, nullptr, FALSE);
+            finishSession();
+            return;
+        }
         if (session && !stopping) {
             stopping = true;
             stoppingAt = GetTickCount64();
+            updatePreview(false);
             session->stop();
             setStatus(L"Stopping.");
             EnableWindow(stopButton, FALSE);
@@ -309,14 +417,15 @@ private:
     }
 
     void openSetup() {
-        if (!session && ShowSetup(instance, window, profile)) {
-            setStatus(L"Setup saved.");
+        if (!session && !recovering && ShowSetup(instance, window, profile)) {
+            updateModePicker();
+            setStatus(L"Settings saved.");
             InvalidateRect(window, nullptr, FALSE);
         }
     }
 
     HINSTANCE instance;
-    HWND window = nullptr, testButton = nullptr, startButton = nullptr, stopButton = nullptr;
+    HWND window = nullptr, testButton = nullptr, startButton = nullptr, modePicker = nullptr, stopButton = nullptr;
     HWND muteButton = nullptr, setupButton = nullptr;
     HFONT titleFont = Font(34, FW_BOLD), bodyFont = Font(17), labelFont = Font(16, FW_SEMIBOLD),
           smallFont = Font(15);
@@ -326,9 +435,13 @@ private:
     std::wstring status = L"Close any open WoW and Battle.net windows before starting.";
     std::unique_ptr<NestedSession> session;
     ULONGLONG stoppingAt = 0;
+    ULONGLONG retryAt = 0;
+    WorkflowMode activeMode = WorkflowMode::TestSetup;
     bool stopping = false;
+    bool recovering = false;
     bool closing = false;
     bool audioFailed = false;
+    bool previewVisible = false;
     Profile profile;
 };
 
@@ -340,9 +453,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     LPWSTR* args = CommandLineToArgvW(GetCommandLineW(), &count);
     if (args && count == 4 && std::wstring_view(args[1]) == L"--nested-worker") {
         const std::wstring name(args[2]);
-        const bool checkOnly = std::wstring_view(args[3]) == L"check";
+        const auto mode = std::find(workerModes.begin(), workerModes.end(), std::wstring_view(args[3]));
         LocalFree(args);
-        return RunNestedWorker(name, checkOnly);
+        if (mode == workerModes.end())
+            return 2;
+        return RunNestedWorker(name, static_cast<WorkflowMode>(mode - workerModes.begin()));
     }
     if (args)
         LocalFree(args);

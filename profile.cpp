@@ -38,10 +38,15 @@ struct Handle {
     ~Handle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
 };
 
-struct StoredProfile {
+struct StoredProfileV1 {
     DWORD version;
     SessionProfile profile;
     DWORD muted;
+};
+
+struct StoredProfile {
+    StoredProfileV1 base;
+    DWORD retryMode;
 };
 
 struct Data {
@@ -129,6 +134,8 @@ std::wstring ValidateCharacter(const Profile& profile) {
 std::wstring ValidateProfile(const Profile& profile) {
     if (auto error = ValidateCharacter(profile); !error.empty())
         return error;
+    if (static_cast<unsigned>(profile.retryMode) >= retryModes.size())
+        return L"Choose a valid retry mode.";
     if (profile.battleNetLauncher.size() >= 1024 || profile.gameLauncher.size() >= 1024)
         return L"Choose launcher paths shorter than 1,024 characters.";
     if (!IsLauncher(profile.battleNetLauncher, L"Battle.net Launcher.exe"))
@@ -210,17 +217,24 @@ bool LoadProfile(Profile& profile) {
         return false;
     DATA_BLOB input{count, encrypted.data()};
     Data output;
-    if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.blob)
-        || output.blob.cbData != sizeof(StoredProfile))
+    if (!CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.blob))
         return false;
-    const auto* stored = reinterpret_cast<const StoredProfile*>(output.blob.pbData);
-    if (stored->version != 1)
+    if (output.blob.cbData != sizeof(StoredProfileV1) && output.blob.cbData != sizeof(StoredProfile))
+        return false;
+    const auto* stored = reinterpret_cast<const StoredProfileV1*>(output.blob.pbData);
+    const bool legacy = output.blob.cbData == sizeof(StoredProfileV1);
+    if (stored->version != (legacy ? 1u : 2u))
         return false;
     try {
         auto candidate = FromSessionProfile(stored->profile);
         if (!ValidateCharacter(candidate).empty())
             return false;
         candidate.muted = stored->muted != 0;
+        if (!legacy) {
+            const auto mode = reinterpret_cast<const StoredProfile*>(output.blob.pbData)->retryMode;
+            if (mode < retryModes.size())
+                candidate.retryMode = static_cast<RetryMode>(mode);
+        }
         profile = std::move(candidate);
         return true;
     } catch (const UserError&) {
@@ -234,7 +248,8 @@ void SaveProfile(const Profile& profile) {
     fs::create_directories(path.parent_path(), error);
     if (error)
         throw UserError{L"Could not create the local settings folder."};
-    StoredProfile record{1, ToSessionProfile(profile), profile.muted ? 1u : 0u};
+    StoredProfile record{{2, ToSessionProfile(profile), profile.muted ? 1u : 0u},
+        static_cast<DWORD>(profile.retryMode)};
     DATA_BLOB input{sizeof record, reinterpret_cast<BYTE*>(&record)};
     Data encrypted;
     const bool protectedData = CryptProtectData(&input, L"WoW Nested character setup", nullptr, nullptr,

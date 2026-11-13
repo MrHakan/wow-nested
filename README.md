@@ -1,19 +1,23 @@
 # WoW Nested
 
-WoW Nested is a portable Windows companion for the World of Warcraft: Forever character creator. It runs Battle.net and WoW on a separate Windows desktop and shows progress in a small window on your main desktop.
+WoW Nested is a portable Windows companion for the World of Warcraft: Forever character creator. It runs Battle.net and WoW on a separate Windows desktop and shows progress in a small window on your main desktop. It can start from the initial ruleset picker or from an existing character list.
 
 ## Getting started
 
 1. Install WoW: Forever and sign in through Battle.net. Quit both apps before starting WoW Nested.
-2. Open the executable and complete the welcome screen. Choose the ruleset, faction, race, class, body type, and both parts of the character name. If an installation needs to be located, select its launcher with **Browse**.
+2. Open the executable and complete the welcome screen. Choose the ruleset, faction, race, class, body type, both parts of the character name, and the retry mode. If an installation needs to be located, select its launcher with **Browse**.
 3. Use **Test setup** to check the selections and name entry. The test ends before submission.
-4. Use **Start loop** for a live attempt. WoW Nested retries only when it confirms the population imbalance warning. The selected ruleset and faction are used on every attempt. **Stop** closes the session. **Mute audio** controls the apps launched by the session. After the loop stops on a different result, close the session and open WoW normally to check the character list.
+4. Choose a retry mode and press **Start**. **Loop mode** stays on the Customize screen and retries **Finish** one second after dismissing a confirmed population imbalance warning. **Battle.net Restart mode** reopens WoW and Battle.net after that warning. In both modes, the session reopens the apps if the game closes, the login servers are full, or an attempt fails. Consecutive failures increase the retry pause from 10 seconds up to one minute. The session ends when WoW returns to the character list after submission. Open WoW normally to confirm the result.
 
-Use **Setup** to change your choices between runs. This version expects the English WoW: Forever character creation screens at 2560 × 1440. The starting screen and allowed characters can depend on your current game state and entitlements. WoW Nested stops when it cannot verify a selection or encounters an unexpected screen.
+**Stop** closes the session. **Mute audio** controls the apps launched by the session.
+
+WoW Nested waits up to 20 seconds for name validation and reports when WoW rejects the name. To change a rejected name, press **Stop** and open **Settings**.
+
+Use **Settings** to change your choices between runs. The retry mode is also available in the main window. This version expects the English WoW: Forever character creation screens at 2560 × 1440. The starting screen and allowed characters can depend on your current game state and entitlements.
 
 ## Privacy
 
-Setup is encrypted with Windows Data Protection and stored in the current user's local application data. The setup screen shows whether the launchers were found and keeps their full paths private. The dashboard shows session status and the supported character creation screens. It does not display Battle.net, sign-in screens, character lists, or the name-entry screen.
+Setup is encrypted with Windows Data Protection and stored in the current user's local application data. The setup screen shows whether the launchers were found and keeps their full paths private. The dashboard previews the login queue, ruleset picker, character creation, and Customize screens while it is in the foreground. The preview covers the name fields and pauses when the dashboard loses focus or is minimized. It excludes Battle.net, credential entry, and saved character lists.
 
 WoW Nested contains no telemetry, networking code, account sign-in form, or screen recording. It uses the Battle.net session you have already opened through Blizzard's launcher. Battle.net and WoW make their own network connections.
 

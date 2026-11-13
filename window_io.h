@@ -23,9 +23,6 @@ enum class App { Launcher, Game };
 HWND FindApp(App app);
 void OpenLauncher(HANDLE job, const std::wstring& path);
 void OpenWoWForever(HANDLE job, const std::wstring& path);
-bool ProcessRunning(HANDLE process);
-void WaitForExit(HANDLE process, std::chrono::milliseconds timeout, std::stop_token stop,
-                 const std::wstring& error);
 void CheckStop(std::stop_token stop);
 void Pause(std::stop_token stop, std::chrono::milliseconds delay);
 void RequireBackground(HWND window);

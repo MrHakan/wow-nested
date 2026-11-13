@@ -7,11 +7,13 @@
 enum class Ruleset : int { Normal, PvP, Roleplay, RoleplayPvP };
 enum class Faction : int { Alliance, Horde };
 enum class Body : int { Type1, Type2 };
+enum class RetryMode : int { Loop, BattleNetRestart };
 enum class CharacterClass : int { Warrior, Hunter, Mage, Rogue, Priest, Warlock, Paladin, Druid, Shaman };
 
 inline constexpr std::array rulesets{L"Normal", L"PvP", L"Roleplay", L"Roleplay PvP"};
 inline constexpr std::array factions{L"Alliance", L"Horde"};
 inline constexpr std::array bodies{L"Body 1", L"Body 2"};
+inline constexpr std::array retryModes{L"Loop mode", L"Battle.net Restart mode"};
 inline constexpr std::array classes{L"Warrior", L"Hunter", L"Mage", L"Rogue", L"Priest",
                                     L"Warlock", L"Paladin", L"Druid", L"Shaman"};
 inline constexpr std::array<std::array<const wchar_t*, 5>, 2> races{{
@@ -29,6 +31,7 @@ struct Profile {
     std::wstring firstName, secondName;
     std::wstring battleNetLauncher, gameLauncher;
     bool muted = false;
+    RetryMode retryMode = RetryMode::BattleNetRestart;
 };
 
 std::wstring CharacterSummary(const Profile& profile);
