@@ -9,8 +9,10 @@
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <thread>
 
 namespace capture = winrt::Windows::Graphics::Capture;
@@ -435,6 +437,44 @@ ImageTemplate::ImageTemplate(int resourceId, bool masked) {
     if (samples_.empty())
         throw UserError{L"The reference image has no pixels to match."};
 
+    // Area-average the image to three quarters of its size for 1920 × 1080 frames. A reference pixel at
+    // x lands at 0.75 x, so each of the four alignments per axis gets its own reduced copy. A reduced
+    // pixel is used only when most of the source area it covers is unmasked.
+    for (int phaseY = 0; phaseY < 4; ++phaseY) {
+        for (int phaseX = 0; phaseX < 4; ++phaseX) {
+            auto& variant = compact_[phaseY * 4 + phaseX];
+            variant.width = (3 * (width_ + phaseX) + 3) / 4;
+            variant.height = (3 * (height_ + phaseY) + 3) / 4;
+            for (int cy = 0; cy < variant.height; ++cy) {
+                for (int cx = 0; cx < variant.width; ++cx) {
+                    const double left = cx * 4.0 / 3 - phaseX, right = (cx + 1) * 4.0 / 3 - phaseX;
+                    const double top = cy * 4.0 / 3 - phaseY, bottom = (cy + 1) * 4.0 / 3 - phaseY;
+                    double sum[3]{}, weight = 0;
+                    const int lastY = std::min<int>(height_, int(std::ceil(bottom)));
+                    const int lastX = std::min<int>(width_, int(std::ceil(right)));
+                    for (int sy = std::max(0, int(std::floor(top))); sy < lastY; ++sy) {
+                        for (int sx = std::max(0, int(std::floor(left))); sx < lastX; ++sx) {
+                            const auto* px = bytes.data() + (static_cast<std::size_t>(sy) * width_ + sx) * 4;
+                            if (masked && px[0] == 255 && px[1] == 0 && px[2] == 255)
+                                continue;
+                            const double w = (std::min<double>(sx + 1, right) - std::max<double>(sx, left))
+                                           * (std::min<double>(sy + 1, bottom) - std::max<double>(sy, top));
+                            for (int c = 0; c < 3; ++c)
+                                sum[c] += w * px[c];
+                            weight += w;
+                        }
+                    }
+                    if (weight < 16.0 / 9 * 0.75)
+                        continue;
+                    variant.samples.push_back({cx, cy, static_cast<std::uint8_t>(sum[0] / weight + 0.5),
+                        static_cast<std::uint8_t>(sum[1] / weight + 0.5), static_cast<std::uint8_t>(sum[2] / weight + 0.5)});
+                }
+            }
+            if (variant.samples.empty())
+                throw UserError{L"The reference image has no pixels to match."};
+        }
+    }
+
     // Check widely spaced pixels first so mismatches stop early.
     std::vector<Sample> ordered;
     ordered.reserve(samples_.size());
@@ -463,4 +503,42 @@ bool ImageTemplate::Matches(const Frame& frame, RECT region, int tolerance) cons
         }
     }
     return false;
+}
+
+double ImageTemplate::CompactScore(const Frame& frame, RECT region) const {
+    double best = std::numeric_limits<double>::max();
+    for (int phase = 0; phase < 16; ++phase) {
+        const auto& variant = compact_[phase];
+        const int phaseX = phase % 4, phaseY = phase / 4;
+        // Reference positions x with x % 4 == phaseX start at 0.75 (x - phaseX) in the compact frame.
+        const auto first = [](LONG value, int phaseValue) {
+            const LONG aligned = value - phaseValue;
+            return std::max<LONG>(0, (aligned + 3) / 4 * 3);
+        };
+        const int left = first(std::max<LONG>(phaseX, region.left), phaseX);
+        const int top = first(std::max<LONG>(phaseY, region.top), phaseY);
+        const int lastX = std::min<int>(frame.width - variant.width, (region.right - width_ - phaseX) / 4 * 3);
+        const int lastY = std::min<int>(frame.height - variant.height, (region.bottom - height_ - phaseY) / 4 * 3);
+        if (region.right - width_ - phaseX < 0 || region.bottom - height_ - phaseY < 0)
+            continue;
+        const long long limitScale = 3LL * variant.samples.size();
+        for (int y = top; y <= lastY; y += 3) {
+            for (int x = left; x <= lastX; x += 3) {
+                const auto origin = (static_cast<std::size_t>(y) * frame.width + x) * 4;
+                const long long limit = best == std::numeric_limits<double>::max()
+                    ? std::numeric_limits<long long>::max() : static_cast<long long>(best * limitScale);
+                long long total = 0;
+                for (const auto& sample : variant.samples) {
+                    const auto* px = frame.pixels.data() + origin
+                        + (static_cast<std::size_t>(sample.y) * frame.width + sample.x) * 4;
+                    total += std::abs(int(px[0]) - sample.blue) + std::abs(int(px[1]) - sample.green)
+                           + std::abs(int(px[2]) - sample.red);
+                    if (total > limit)
+                        break;
+                }
+                best = std::min(best, double(total) / limitScale);
+            }
+        }
+    }
+    return best;
 }

@@ -38,6 +38,49 @@ constexpr std::array patterns{
 
 constexpr POINT finishButton{2355, 1366};
 
+// All coordinates and reference images use the 2560 × 1440 layout. WoW scales its interface with the
+// window height, so a 1920 × 1080 window shows the same layout at three quarters of the size.
+constexpr int referenceWidth = 2560, referenceHeight = 1440;
+constexpr int compactWidth = 1920, compactHeight = 1080;
+// Highest mean difference per color channel accepted when matching a 1920 × 1080 frame. Masked
+// images are thin text, where resampling changes more of each pixel than on solid interface parts.
+constexpr double compactThreshold = 10, compactMaskedThreshold = 35;
+
+void Upscale(const Frame& source, Frame& target) {
+    target.width = referenceWidth;
+    target.height = referenceHeight;
+    target.compact = &source;
+    target.pixels.resize(static_cast<std::size_t>(referenceWidth) * referenceHeight * 4);
+    // Bilinear sampling with pixel centers aligned between both grids, in 1/256 pixel steps.
+    std::vector<int> x0(referenceWidth), x1(referenceWidth), wx(referenceWidth);
+    for (int x = 0; x < referenceWidth; ++x) {
+        const int position = std::max(0, (x * 2 + 1) * source.width * 128 / referenceWidth - 128);
+        x0[x] = std::min(position >> 8, source.width - 1);
+        x1[x] = std::min(x0[x] + 1, source.width - 1);
+        wx[x] = position & 255;
+    }
+    for (int y = 0; y < referenceHeight; ++y) {
+        const int position = std::max(0, (y * 2 + 1) * source.height * 128 / referenceHeight - 128);
+        const int y0 = std::min(position >> 8, source.height - 1);
+        const int y1 = std::min(y0 + 1, source.height - 1);
+        const int wy = position & 255;
+        const auto* top = source.pixels.data() + static_cast<std::size_t>(y0) * source.width * 4;
+        const auto* bottom = source.pixels.data() + static_cast<std::size_t>(y1) * source.width * 4;
+        auto* out = target.pixels.data() + static_cast<std::size_t>(y) * referenceWidth * 4;
+        for (int x = 0; x < referenceWidth; ++x, out += 4) {
+            const auto* a = top + x0[x] * 4;
+            const auto* b = top + x1[x] * 4;
+            const auto* c = bottom + x0[x] * 4;
+            const auto* d = bottom + x1[x] * 4;
+            for (int channel = 0; channel < 4; ++channel) {
+                const int upper = a[channel] * (256 - wx[x]) + b[channel] * wx[x];
+                const int lower = c[channel] * (256 - wx[x]) + d[channel] * wx[x];
+                out[channel] = static_cast<std::uint8_t>((upper * (256 - wy) + lower * wy + 32768) >> 16);
+            }
+        }
+    }
+}
+
 bool FinishButtonEnabled(const Frame& frame) {
     // The enabled button has red fill on both sides of its label.
     for (const int side : {2240, 2440}) {
@@ -56,6 +99,9 @@ bool FinishButtonEnabled(const Frame& frame) {
 }
 
 bool SelectedBorder(const Frame& frame, int centerX, int top, int bottom, int span) {
+    // Resampling blurs the thin line, so check a 1920 × 1080 capture directly.
+    if (frame.compact)
+        return SelectedBorder(*frame.compact, centerX * 3 / 4, top * 3 / 4, (bottom * 3 + 3) / 4, span * 3 / 4);
     // A selected tile has a continuous bright gold line across the top.
     for (int y = top; y <= bottom; ++y) {
         int continuous = 0;
@@ -95,7 +141,14 @@ public:
     bool has(const Frame& frame, Mark mark) const {
         const auto index = static_cast<std::size_t>(mark);
         const auto& pattern = patterns[index];
+        if (frame.compact)
+            return score(*frame.compact, mark) <= (pattern.masked ? compactMaskedThreshold : compactThreshold);
         return images[index].Matches(frame, pattern.region, pattern.tolerance);
+    }
+
+    double score(const Frame& compactFrame, Mark mark) const {
+        const auto index = static_cast<std::size_t>(mark);
+        return images[index].CompactScore(compactFrame, patterns[index].region);
     }
 
 private:
@@ -117,10 +170,8 @@ public:
         do {
             CheckStop(stop);
             waitForResponse();
-            const Frame* frame = readFrame();
+            const Frame* frame = normalize(readFrame());
             if (frame) {
-                if (frame->width != 2560 || frame->height != 1440)
-                    throw UserError{L"Set WoW to 2560 × 1440 in its display options and try again."};
                 if (frames.enabled()) {
                     const bool customize = images.has(*frame, Mark::FullName);
                     const bool supported = customize || images.has(*frame, Mark::RulesTitle) || characterScreen(*frame)
@@ -147,14 +198,14 @@ public:
 
     void click(POINT point) {
         CheckStop(stop);
-        ClickInWindow(window, point, false, stop);
+        ClickInWindow(window, toWindow(point), false, stop);
     }
 
     void type(const std::wstring& text) { TypeInWindow(window, text, stop); }
     void key(UINT keyCode) { PressInWindow(window, keyCode, stop); }
     void movePointer(POINT point) {
         CheckStop(stop);
-        MovePointerInWindow(window, point, false);
+        MovePointerInWindow(window, toWindow(point), false);
     }
 
     bool characterScreen(const Frame& frame) const {
@@ -281,6 +332,27 @@ public:
     }
 
 private:
+    const Frame* normalize(const Frame* frame) {
+        if (!frame)
+            return nullptr;
+        if (frame->width == referenceWidth && frame->height == referenceHeight) {
+            compact = false;
+            return frame;
+        }
+        if (frame->width == compactWidth && frame->height == compactHeight) {
+            compact = true;
+            Upscale(*frame, resampled);
+            return &resampled;
+        }
+        throw UserError{L"Set WoW to 2560 × 1440 or 1920 × 1080 in its display options and try again."};
+    }
+
+    POINT toWindow(POINT point) const {
+        if (!compact)
+            return point;
+        return {point.x * compactWidth / referenceWidth, point.y * compactHeight / referenceHeight};
+    }
+
     void waitForResponse() const {
         const auto deadline = Clock::now() + 30s;
         do {
@@ -316,6 +388,8 @@ private:
     std::stop_token stop;
     const NestedFrames& frames;
     HiddenCapture capture;
+    Frame resampled;
+    bool compact = false;
 };
 
 HWND WaitForApp(App app, std::chrono::milliseconds timeout, std::stop_token stop) {

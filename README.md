@@ -13,7 +13,7 @@ WoW Nested is a portable Windows companion for the World of Warcraft: Forever ch
 
 WoW Nested waits up to 20 seconds for name validation and reports when WoW rejects the name. To change a rejected name, press **Stop** and open **Settings**.
 
-Use **Settings** to change your choices between runs. The retry mode is also available in the main window. This version expects the English WoW: Forever character creation screens at 2560 × 1440. The starting screen and allowed characters can depend on your current game state and entitlements.
+Use **Settings** to change your choices between runs. The retry mode is also available in the main window. This version expects the English WoW: Forever character creation screens at 2560 × 1440 or 1920 × 1080. The resolution is detected from the WoW window. The starting screen and allowed characters can depend on your current game state and entitlements.
 
 ## Privacy
 

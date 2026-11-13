@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -48,6 +49,8 @@ struct Frame {
     int width = 0;
     int height = 0;
     std::vector<std::uint8_t> pixels;
+    // Set on a 2560 × 1440 frame resampled from a 1920 × 1080 capture. Points to that capture.
+    const Frame* compact = nullptr;
 };
 
 class WindowCapture {
@@ -82,6 +85,9 @@ class ImageTemplate {
 public:
     explicit ImageTemplate(int resourceId, bool masked = false);
     bool Matches(const Frame& frame, RECT region, int tolerance) const;
+    // Compares a 1920 × 1080 frame with this image reduced to three quarters of its size. Returns the
+    // lowest mean difference per color channel. Region uses 2560 × 1440 units.
+    double CompactScore(const Frame& compactFrame, RECT region) const;
 private:
     struct Sample {
         int x;
@@ -93,4 +99,10 @@ private:
     int width_ = 0;
     int height_ = 0;
     std::vector<Sample> samples_;
+    struct CompactImage {
+        int width = 0;
+        int height = 0;
+        std::vector<Sample> samples;
+    };
+    std::array<CompactImage, 16> compact_;
 };
