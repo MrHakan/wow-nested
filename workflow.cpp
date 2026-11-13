@@ -253,7 +253,7 @@ public:
         if (!found) {
             if (queued)
                 throw UserError{L"WoW is still in the login queue after 30 minutes."};
-            throw UserError{L"WoW did not reach the ruleset picker or character list. Check the game connection."};
+            throw UserError{L"WoW did not reach the ruleset picker or character list." + saveScreen()};
         }
         if (characterList) {
             report(L"WoW opened the character list. Opening the ruleset picker.");
@@ -331,10 +331,22 @@ public:
         });
     }
 
+    // Keeps the last unrecognized game screen so the user can see where WoW stopped.
+    std::wstring saveScreen() const {
+        if (!lastCapture)
+            return L" WoW showed no image.";
+        try {
+            return L" The last WoW screen was saved to " + SaveDiagnosticFrame(*lastCapture, L"last-wow-screen.png") + L".";
+        } catch (...) {
+            return {};
+        }
+    }
+
 private:
     const Frame* normalize(const Frame* frame) {
         if (!frame)
             return nullptr;
+        lastCapture = frame;
         if (frame->width == referenceWidth && frame->height == referenceHeight) {
             compact = false;
             return frame;
@@ -389,6 +401,7 @@ private:
     const NestedFrames& frames;
     HiddenCapture capture;
     Frame resampled;
+    const Frame* lastCapture = nullptr;
     bool compact = false;
 };
 
@@ -566,12 +579,12 @@ bool RunAttempt(std::stop_token stop, const Report& report, const NestedFrames& 
         characterList = view.characterListReady(frame);
         return characterList || view.characterScreen(frame);
     }))
-        throw UserError{L"The character creation screen did not load in time."};
+        throw UserError{L"The character creation screen did not load in time." + view.saveScreen()};
     if (characterList) {
         report(L"Opening Create Character on the selected ruleset.");
         view.click({2247, 1307});
         if (!view.until(20s, [&](const Frame& frame) { return view.characterScreen(frame); }))
-            throw UserError{L"Create Character did not open the character creation screen."};
+            throw UserError{L"Create Character did not open the character creation screen." + view.saveScreen()};
     }
     SelectCharacter(view, profile, report);
     EnterNames(view, profile, report);

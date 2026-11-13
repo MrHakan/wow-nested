@@ -53,6 +53,9 @@ struct Frame {
     const Frame* compact = nullptr;
 };
 
+// Saves a frame as a PNG in the app's local folder and returns the file path.
+std::wstring SaveDiagnosticFrame(const Frame& frame, const wchar_t* fileName);
+
 class WindowCapture {
 public:
     explicit WindowCapture(HWND window);

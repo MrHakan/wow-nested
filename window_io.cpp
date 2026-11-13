@@ -1,6 +1,7 @@
 #include "window_io.h"
 #include <d3d11.h>
 #include <dwmapi.h>
+#include <shlobj.h>
 #include <wincodec.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
@@ -246,6 +247,42 @@ void PressInWindow(HWND window, UINT key, std::stop_token stop) {
         throw;
     }
     Post(window, WM_KEYUP, key, state | 0xC0000000);
+}
+
+std::wstring SaveDiagnosticFrame(const Frame& frame, const wchar_t* fileName) {
+    wchar_t* raw = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &raw)))
+        throw UserError{L"Windows could not find your local settings folder."};
+    const std::filesystem::path folder = std::filesystem::path(raw) / L"WoW Nested";
+    CoTaskMemFree(raw);
+    std::filesystem::create_directories(folder);
+    const auto path = (folder / fileName).wstring();
+
+    winrt::com_ptr<IWICImagingFactory> factory;
+    winrt::check_hresult(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(factory.put())));
+    winrt::com_ptr<IWICStream> stream;
+    winrt::check_hresult(factory->CreateStream(stream.put()));
+    winrt::check_hresult(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE));
+    winrt::com_ptr<IWICBitmapEncoder> encoder;
+    winrt::check_hresult(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put()));
+    winrt::check_hresult(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache));
+    winrt::com_ptr<IWICBitmapFrameEncode> image;
+    winrt::check_hresult(encoder->CreateNewFrame(image.put(), nullptr));
+    winrt::check_hresult(image->Initialize(nullptr));
+    winrt::check_hresult(image->SetSize(frame.width, frame.height));
+    // Captured pixels carry no meaningful alpha, so the image is stored as 24-bit color.
+    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(frame.width) * frame.height * 3);
+    for (std::size_t i = 0, n = static_cast<std::size_t>(frame.width) * frame.height; i < n; ++i)
+        std::memcpy(rgb.data() + i * 3, frame.pixels.data() + i * 4, 3);
+    WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
+    winrt::check_hresult(image->SetPixelFormat(&format));
+    if (format != GUID_WICPixelFormat24bppBGR)
+        throw UserError{L"Could not save the WoW screen image."};
+    winrt::check_hresult(image->WritePixels(frame.height, frame.width * 3, static_cast<UINT>(rgb.size()), rgb.data()));
+    winrt::check_hresult(image->Commit());
+    winrt::check_hresult(encoder->Commit());
+    return path;
 }
 
 class WindowCapture::State {

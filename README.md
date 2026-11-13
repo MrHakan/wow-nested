@@ -19,6 +19,8 @@ Use **Settings** to change your choices between runs. The retry mode is also ava
 
 Setup is encrypted with Windows Data Protection and stored in the current user's local application data. The setup screen shows whether the launchers were found and keeps their full paths private. The dashboard previews the login queue, ruleset picker, character creation, and Customize screens while it is in the foreground. The preview covers the name fields and pauses when the dashboard loses focus or is minimized. It excludes Battle.net, credential entry, and saved character lists.
 
+If WoW does not reach a screen WoW Nested recognizes, the last image of the WoW window is saved to `%LOCALAPPDATA%\WoW Nested\last-wow-screen.png` and the status shows that path. The file stays on your PC and is replaced on the next failure.
+
 WoW Nested contains no telemetry, networking code, account sign-in form, or screen recording. It uses the Battle.net session you have already opened through Blizzard's launcher. Battle.net and WoW make their own network connections.
 
 ## Build from source
