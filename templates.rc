@@ -1,0 +1,50 @@
+#include <windows.h>
+#include "resource.h"
+1 RT_MANIFEST "app.manifest"
+104 RCDATA "assets\\select.png"
+109 RCDATA "assets\\name.png"
+110 RCDATA "assets\\population.png"
+111 RCDATA "assets\\population-okay.png"
+116 RCDATA "assets\\first-empty.png"
+117 RCDATA "assets\\last-empty.png"
+118 RCDATA "assets\\name-valid.png"
+119 RCDATA "assets\\rules-title.png"
+120 RCDATA "assets\\alliance-label.png"
+121 RCDATA "assets\\horde-label.png"
+
+IDD_SETUP DIALOGEX 0, 0, 380, 296
+STYLE DS_MODALFRAME | DS_CENTER | DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "WoW Nested setup"
+FONT 10, "Segoe UI"
+BEGIN
+    LTEXT       "Welcome to WoW Nested", IDC_SETUP_HEADING, 18, 12, 344, 25
+    LTEXT       "Choose the character you want to create.", -1, 18, 43, 344, 14
+
+    LTEXT       "&Ruleset", -1, 18, 68, 103, 12
+    COMBOBOX    IDC_RULESET, 18, 82, 110, 106, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT       "&Faction", -1, 136, 68, 103, 12
+    COMBOBOX    IDC_FACTION, 136, 82, 101, 106, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT       "Bod&y type", -1, 247, 68, 104, 12
+    COMBOBOX    IDC_BODY, 247, 82, 115, 106, CBS_DROPDOWNLIST | WS_TABSTOP
+
+    LTEXT       "R&ace", -1, 18, 111, 165, 12
+    COMBOBOX    IDC_RACE, 18, 125, 165, 122, CBS_DROPDOWNLIST | WS_TABSTOP
+    LTEXT       "&Class", -1, 193, 111, 169, 12
+    COMBOBOX    IDC_CLASS, 193, 125, 169, 132, CBS_DROPDOWNLIST | WS_TABSTOP
+
+    LTEXT       "&Main name", -1, 18, 154, 165, 12
+    EDITTEXT    IDC_FIRST_NAME, 18, 168, 165, 17, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT       "&Secondary name", -1, 193, 154, 169, 12
+    EDITTEXT    IDC_SECOND_NAME, 193, 168, 169, 17, ES_AUTOHSCROLL | WS_TABSTOP
+
+    LTEXT       "Battle.net", -1, 18, 204, 75, 12
+    LTEXT       "", IDC_BATTLENET_STATE, 111, 204, 166, 12
+    PUSHBUTTON  "Browse...", IDC_BROWSE_BATTLENET, 294, 200, 68, 17
+    LTEXT       "WoW: Forever", -1, 18, 226, 90, 12
+    LTEXT       "", IDC_WOW_STATE, 111, 226, 166, 12
+    PUSHBUTTON  "Browse...", IDC_BROWSE_WOW, 294, 222, 68, 17
+
+    LTEXT       "", IDC_SETUP_ERROR, 18, 244, 344, 23
+    PUSHBUTTON  "Cancel", IDCANCEL, 202, 270, 69, 17
+    DEFPUSHBUTTON "Save setup", IDOK, 282, 270, 80, 17
+END

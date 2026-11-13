@@ -1,0 +1,12 @@
+/build/
+/.vs/
+/tests/
+*.obj
+*.res
+*.pdb
+*.ilk
+*.exe
+*.log
+*.bmp
+*.dat
+*.tmp
